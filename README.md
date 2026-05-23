@@ -661,4 +661,357 @@ R-COLOR_R-TAILLE_S
 
 ---
 
+
 # Author
+
+# Locations, Location Stock and Stock Movements
+
+## Locations
+
+A location represents a physical place that belongs to a merchant.
+
+Example:
+
+```txt
+Merchant: Mofavo Store
+Location: Depot Tunis
+```
+
+A merchant can have many locations.
+
+### Location APIs
+
+```http
+GET    /api/locations
+POST   /api/locations
+GET    /api/locations/{id}
+GET    /api/locations/merchant/{merchantId}
+PUT    /api/locations/{id}
+DELETE /api/locations/{id}
+```
+
+Example body:
+
+```json
+{
+  "merchantId": "5696d019-09c1-40c4-848b-2d95928d7584",
+  "name": "Depot Tunis",
+  "type": "WAREHOUSE",
+  "address": "Tunis Centre",
+  "isActive": true
+}
+```
+
+---
+
+## Location Stock
+
+Location stock represents the current stock of one SKU in one location.
+
+It answers this question:
+
+```txt
+How many pieces of this SKU are available in this location right now?
+```
+
+Example:
+
+```txt
+Location: Depot Tunis
+SKU: R-COLOR_R-TAILLE_S
+Quantity: 20
+Reserved: 3
+Available: 17
+```
+
+Formula:
+
+```txt
+available = quantity - reserved
+```
+
+### Location Stock APIs
+
+```http
+GET    /api/location-stocks
+POST   /api/location-stocks
+GET    /api/location-stocks/{id}
+GET    /api/location-stocks/location/{locationId}
+GET    /api/location-stocks/sku/{skuId}
+GET    /api/location-stocks/location/{locationId}/sku/{skuId}
+PUT    /api/location-stocks/{id}
+DELETE /api/location-stocks/{id}
+```
+
+Example body to create initial stock:
+
+```json
+{
+  "locationId": "f2f1c59c-0de5-4ad3-87b6-89676ef745b1",
+  "skuId": "473cdbb1-961e-4951-aec7-d0375ad42e9a",
+  "quantity": 20,
+  "reserved": 0,
+  "reason": "Initial stock",
+  "reference": "INIT-001"
+}
+```
+
+Important:
+
+```txt
+POST /api/location-stocks
+```
+
+is used only when stock does not already exist for the same location and SKU.
+
+If stock already exists, use:
+
+```txt
+PUT /api/location-stocks/{id}
+```
+
+---
+
+## Stock Movements
+
+Stock movements represent the history of stock changes.
+
+`location_stock` stores the current stock state.
+
+`stock_movements` stores the history of changes.
+
+Example current stock:
+
+```txt
+quantity = 30
+reserved = 3
+available = 27
+```
+
+This tells us the current stock.
+
+Stock movements explain how the stock reached this value.
+
+Example movement:
+
+```txt
+movementType: IN
+quantityBefore: 20
+quantityAfter: 30
+quantity: 10
+reason: Stock replenishment
+reference: IN-001
+```
+
+This means:
+
+```txt
+The stock increased by 10 pieces.
+Before the movement, quantity was 20.
+After the movement, quantity became 30.
+```
+
+### Movement Types
+
+```txt
+INITIAL    = first stock creation
+IN         = stock increased
+OUT        = stock decreased
+RESERVED   = reserved quantity increased
+RELEASED   = reserved quantity decreased
+ADJUSTMENT = quantity and reserved changed together
+```
+
+### Stock Movement APIs
+
+```http
+GET /api/stock-movements
+GET /api/stock-movements/{id}
+GET /api/stock-movements/location-stock/{locationStockId}
+GET /api/stock-movements/location/{locationId}
+GET /api/stock-movements/sku/{skuId}
+```
+
+There is no POST endpoint for stock movements.
+
+Stock movements are created automatically when location stock is created or updated.
+
+This avoids inconsistent data.
+
+For example, this would be bad:
+
+```txt
+stock_movement says quantity changed
+but location_stock did not change
+```
+
+To avoid this problem, the system updates `location_stock` first, then automatically records a `stock_movement`.
+
+---
+
+## Example Stock Workflow
+
+### 1. Create initial stock
+
+```http
+POST /api/location-stocks
+```
+
+```json
+{
+  "locationId": "f2f1c59c-0de5-4ad3-87b6-89676ef745b1",
+  "skuId": "473cdbb1-961e-4951-aec7-d0375ad42e9a",
+  "quantity": 20,
+  "reserved": 0,
+  "reason": "Initial stock",
+  "reference": "INIT-001"
+}
+```
+
+Expected current stock:
+
+```txt
+quantity = 20
+reserved = 0
+available = 20
+```
+
+Expected movement:
+
+```txt
+movementType = INITIAL
+quantityBefore = 0
+quantityAfter = 20
+reservedBefore = 0
+reservedAfter = 0
+```
+
+### 2. Increase stock
+
+```http
+PUT /api/location-stocks/{locationStockId}
+```
+
+```json
+{
+  "locationId": "f2f1c59c-0de5-4ad3-87b6-89676ef745b1",
+  "skuId": "473cdbb1-961e-4951-aec7-d0375ad42e9a",
+  "quantity": 30,
+  "reserved": 0,
+  "reason": "Stock replenishment",
+  "reference": "IN-001"
+}
+```
+
+Expected movement:
+
+```txt
+movementType = IN
+quantityBefore = 20
+quantityAfter = 30
+quantity = 10
+```
+
+### 3. Reserve stock
+
+```http
+PUT /api/location-stocks/{locationStockId}
+```
+
+```json
+{
+  "locationId": "f2f1c59c-0de5-4ad3-87b6-89676ef745b1",
+  "skuId": "473cdbb1-961e-4951-aec7-d0375ad42e9a",
+  "quantity": 30,
+  "reserved": 3,
+  "reason": "Order reservation",
+  "reference": "ORDER-001"
+}
+```
+
+Expected movement:
+
+```txt
+movementType = RESERVED
+reservedBefore = 0
+reservedAfter = 3
+quantity = 3
+```
+
+Expected current stock:
+
+```txt
+quantity = 30
+reserved = 3
+available = 27
+```
+
+### 4. Sell stock
+
+```http
+PUT /api/location-stocks/{locationStockId}
+```
+
+```json
+{
+  "locationId": "f2f1c59c-0de5-4ad3-87b6-89676ef745b1",
+  "skuId": "473cdbb1-961e-4951-aec7-d0375ad42e9a",
+  "quantity": 28,
+  "reserved": 3,
+  "reason": "Sale",
+  "reference": "SALE-001"
+}
+```
+
+Expected movement:
+
+```txt
+movementType = OUT
+quantityBefore = 30
+quantityAfter = 28
+quantity = 2
+```
+
+Expected current stock:
+
+```txt
+quantity = 28
+reserved = 3
+available = 25
+```
+
+---
+
+## Stock Tables Summary
+
+```txt
+locations
+= physical places that belong to merchants
+
+location_stock
+= current stock for one SKU in one location
+
+stock_movements
+= history of changes made to location_stock
+```
+
+Relationship:
+
+```txt
+Merchant
+  -> Location
+      -> LocationStock
+          -> StockMovements
+
+Product
+  -> SKU
+      -> LocationStock
+```
+
+EOF
+
+git status
+git add README.md
+git commit -m "Document locations stock and stock movements"
+git push
+git status
